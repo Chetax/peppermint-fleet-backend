@@ -1,0 +1,7 @@
+# Fleet backend — Docker Compose
+#
+# Scaffold only for now. Services will be filled in as each piece
+# lands: broker (Mosquitto) -> robots (mock publishers) -> backend (FastAPI).
+version: "3.9"
+
+services: {}

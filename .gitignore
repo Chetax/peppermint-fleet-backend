@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Docker
+*.log
+
+# Data / local runtime
+*.db
+*.sqlite3
+mosquitto-data/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
