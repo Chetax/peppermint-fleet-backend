@@ -72,9 +72,23 @@ docker compose up --build
 *(Exact ports/routes will be finalized as the backend lands — this section
 gets updated then.)*
 
+## Progress so far
+
+- ✅ **Broker** (`broker/`) — Mosquitto configured with `allow_anonymous`,
+  persistence to disk, and stdout logging.
+- ✅ **Mock robot fleet** (`robots/`) — one publisher per robot, each
+  reading `ROBOT_ID` from its environment, filtering `events.jsonl` down
+  to its own events, and replaying them in order over MQTT
+  (`robots/{robot_id}/state`, QoS 1, retained). Replay speed is
+  configurable via `SPEED_MULTIPLIER` (default 10x). Verified working
+  end-to-end via `docker compose up --build` — all 8 robots connect,
+  publish their own events, and exit cleanly when done.
+- 🚧 **Backend service** (`backend/`) — not started yet.
+
 ## What's next
 
-This is the first commit — just the README and Docker Compose scaffold.
-The plan is to build this out incrementally (broker config → mock robot
-publishers → backend ingestion → WebSocket/REST → tests), with each piece
-landing as its own commit/branch as the project moves forward.
+Next up: the FastAPI backend — an MQTT consumer that subscribes to
+`robots/+/state`, maintains fleet state in memory, and serves it via
+both a WebSocket stream and a REST endpoint backed by the same store.
+Tests and the `depends_on` → healthcheck fix for the broker dependency
+will land alongside it.
