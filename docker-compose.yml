@@ -4,4 +4,124 @@
 # lands: broker (Mosquitto) -> robots (mock publishers) -> backend (FastAPI).
 version: "3.9"
 
-services: {}
+services:
+  broker:
+    image: eclipse-mosquitto:2
+    container_name: peppermint-broker
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./broker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped
+
+  robot-r1:
+    build: ./robots
+    environment:
+      - ROBOT_ID=r1
+      - MQTT_HOST=broker
+      - MQTT_PORT=1883
+      - EVENTS_FILE=/data/events.jsonl
+      - SPEED_MULTIPLIER=10
+    volumes:
+      - ./data:/data:ro
+    depends_on:
+      - broker
+    restart: "no"
+
+  robot-r2:
+    build: ./robots
+    environment:
+      - ROBOT_ID=r2
+      - MQTT_HOST=broker
+      - MQTT_PORT=1883
+      - EVENTS_FILE=/data/events.jsonl
+      - SPEED_MULTIPLIER=10
+    volumes:
+      - ./data:/data:ro
+    depends_on:
+      - broker
+    restart: "no"
+
+  robot-r3:
+    build: ./robots
+    environment:
+      - ROBOT_ID=r3
+      - MQTT_HOST=broker
+      - MQTT_PORT=1883
+      - EVENTS_FILE=/data/events.jsonl
+      - SPEED_MULTIPLIER=10
+    volumes:
+      - ./data:/data:ro
+    depends_on:
+      - broker
+    restart: "no"
+
+  robot-r4:
+    build: ./robots
+    environment:
+      - ROBOT_ID=r4
+      - MQTT_HOST=broker
+      - MQTT_PORT=1883
+      - EVENTS_FILE=/data/events.jsonl
+      - SPEED_MULTIPLIER=10
+    volumes:
+      - ./data:/data:ro
+    depends_on:
+      - broker
+    restart: "no"
+
+  robot-r5:
+    build: ./robots
+    environment:
+      - ROBOT_ID=r5
+      - MQTT_HOST=broker
+      - MQTT_PORT=1883
+      - EVENTS_FILE=/data/events.jsonl
+      - SPEED_MULTIPLIER=10
+    volumes:
+      - ./data:/data:ro
+    depends_on:
+      - broker
+    restart: "no"
+
+  robot-r6:
+    build: ./robots
+    environment:
+      - ROBOT_ID=r6
+      - MQTT_HOST=broker
+      - MQTT_PORT=1883
+      - EVENTS_FILE=/data/events.jsonl
+      - SPEED_MULTIPLIER=10
+    volumes:
+      - ./data:/data:ro
+    depends_on:
+      - broker
+    restart: "no"
+
+  robot-r7:
+    build: ./robots
+    environment:
+      - ROBOT_ID=r7
+      - MQTT_HOST=broker
+      - MQTT_PORT=1883
+      - EVENTS_FILE=/data/events.jsonl
+      - SPEED_MULTIPLIER=10
+    volumes:
+      - ./data:/data:ro
+    depends_on:
+      - broker
+    restart: "no"
+
+  robot-r8:
+    build: ./robots
+    environment:
+      - ROBOT_ID=r8
+      - MQTT_HOST=broker
+      - MQTT_PORT=1883
+      - EVENTS_FILE=/data/events.jsonl
+      - SPEED_MULTIPLIER=10
+    volumes:
+      - ./data:/data:ro
+    depends_on:
+      - broker
+    restart: "no"
