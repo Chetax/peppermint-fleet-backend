@@ -19,44 +19,67 @@ can never disagree with each other.
 | Broker | Mosquitto (MQTT) | Lightweight pub/sub, retained messages give reconnecting clients last-known state for free, QoS gives delivery guarantees without hand-rolling them |
 | Backend | FastAPI (Python) | Native async, first-class WebSocket support, fast to iterate on |
 | Mock fleet | Python, one process per robot | Matches "8 compose services / 8 processes, not 8 coroutines" requirement in the brief |
-| Orchestration | Docker Compose | Single `docker compose up`, no manual setup |
+| Orchestration | Docker Compose | Single `docker compose up`, no manual setup, broker healthcheck gates backend/robot startup |
 
 ## Architecture
 
 ```
 robots/ (8 publisher     →  broker/ (Mosquitto)  →  backend/ (FastAPI)
-processes, one per          retained topics per      ├─ MQTT consumer
-robot, replaying              robot                   ├─ in-memory fleet state
-data/events.jsonl)                                    ├─ WebSocket stream  ──▶ live clients
-                                                       └─ REST /fleet       ──▶ polling clients
+processes, one per          retained topics per      ├─ mqtt_consumer.py (MQTT thread → event loop bridge)
+robot, replaying              robot                   ├─ state.py (in-memory fleet state)
+data/events.jsonl)                                    ├─ connection_manager.py (WebSocket fanout)
+                                                       ├─ WebSocket /ws  ──▶ live clients (snapshot + deltas)
+                                                       └─ REST /fleet    ──▶ polling clients
 ```
 
 - **Broker (`broker/`):** Each robot publishes to `robots/{robot_id}/state`,
   retained. A backend that restarts, or a client that reconnects, gets the
   last known value immediately instead of waiting for the next tick.
+  Healthcheck (`mosquitto_pub` ping) gates `depends_on` for both the
+  backend and every robot, so nothing starts trying to connect before the
+  broker can actually accept connections.
 - **Mock robot fleet (`robots/`):** One publisher per robot in
   `robots.json`, replaying that robot's own recorded events from
   `data/events.jsonl` in order — standing in for what the real robot would
   report live.
-- **Backend service (`backend/`):** Subscribes to all robot topics,
-  maintains fleet state in memory, and serves it via WebSocket (push) and
-  REST (pull) from the same store.
+- **Backend service (`backend/`):**
+  - `mqtt_consumer.py` subscribes to `robots/+/state`. Its `on_message`
+    callback runs on paho-mqtt's own background thread, so it hands data
+    to the asyncio event loop via `asyncio.run_coroutine_threadsafe`
+    rather than touching shared state directly from that thread.
+  - `state.py` holds fleet state as a plain `dict[robot_id, entry]`, no
+    lock. Because every write is routed onto the single-threaded event
+    loop (see above) and a dict assignment has no `await` inside it, no
+    two writes/reads can interleave mid-operation.
+  - `connection_manager.py` tracks connected WebSocket clients, each with
+    its own `asyncio.Queue`. A new connection gets the full current
+    snapshot immediately (so it starts in sync with what REST would
+    return at that instant), then deltas as they arrive.
+  - `main.py` wires the above together and exposes `/fleet` (REST) and
+    `/ws` (WebSocket).
 - **Docker Compose:** Brings up the broker, backend, and mock fleet
-  together, no manual steps beyond `docker compose up`.
+  together, no manual steps beyond `docker compose up --build`.
 
 ## Project layout
 
 ```
 peppermint-fleet-backend/
-├── broker/              # Mosquitto config
-├── robots/              # Mock robot publishers
-├── backend/             # FastAPI ingestion + WebSocket + REST
-├── data/                # robots.json, events.jsonl (provided fixtures)
-├── tests/               # Tests for the trickiest part
+├── broker/                    # Mosquitto config
+├── robots/                    # Mock robot publishers
+├── backend/
+│   ├── main.py                 # FastAPI app, routes, startup wiring
+│   ├── state.py                 # Fleet state store
+│   ├── connection_manager.py     # WebSocket client tracking + fanout
+│   ├── mqtt_consumer.py           # MQTT subscribe + thread→loop bridge
+│   ├── requirements.txt
+│   ├── Dockerfile
+│   └── tests/
+│       └── test_state.py       # Tests for state.py (see "Testing" below)
+├── data/                       # robots.json, events.jsonl (provided fixtures)
 ├── docker-compose.yml
 ├── README.md
-├── ANSWERS.md
-├── SYSTEM_DESIGN.md
+├── ANSWERS.md                  # pending
+├── SYSTEM_DESIGN.md            # pending
 └── .gitignore
 ```
 
@@ -66,29 +89,62 @@ peppermint-fleet-backend/
 docker compose up --build
 ```
 
-- Backend REST: `http://localhost:8000/fleet`
-- Backend WebSocket: `ws://localhost:8000/ws`
+- Backend REST: `http://localhost:8001/fleet`
+- Backend WebSocket: `ws://localhost:8001/ws`
 
-*(Exact ports/routes will be finalized as the backend lands — this section
-gets updated then.)*
+(Mapped to host port 8001, not 8000, only because port 8000 was already in
+use locally by an unrelated container on the dev machine — the backend
+itself listens on 8000 inside its own container, and other services reach
+it via `backend:8000` on Compose's internal network.)
 
-## Progress so far
+## Testing
 
-- ✅ **Broker** (`broker/`) — Mosquitto configured with `allow_anonymous`,
-  persistence to disk, and stdout logging.
-- ✅ **Mock robot fleet** (`robots/`) — one publisher per robot, each
-  reading `ROBOT_ID` from its environment, filtering `events.jsonl` down
-  to its own events, and replaying them in order over MQTT
-  (`robots/{robot_id}/state`, QoS 1, retained). Replay speed is
-  configurable via `SPEED_MULTIPLIER` (default 10x). Verified working
-  end-to-end via `docker compose up --build` — all 8 robots connect,
-  publish their own events, and exit cleanly when done.
-- 🚧 **Backend service** (`backend/`) — not started yet.
+```bash
+cd backend
+python3 -m pip install -r requirements.txt
+python3 -m pytest tests/ -v
+```
 
-## What's next
+Tests cover `state.py`, identified as the trickiest correctness-critical
+logic to get right — not the MQTT wiring itself, which is mostly plumbing
+best verified by integration testing (i.e. actually running the stack, as
+described above), but the in-memory state store that both the WebSocket
+stream and the REST endpoint read from:
 
-Next up: the FastAPI backend — an MQTT consumer that subscribes to
-`robots/+/state`, maintains fleet state in memory, and serves it via
-both a WebSocket stream and a REST endpoint backed by the same store.
-Tests and the `depends_on` → healthcheck fix for the broker dependency
-will land alongside it.
+- Basic store/retrieve correctness.
+- **`get_snapshot()` returns an independent copy, not a live reference** —
+  the one non-obvious behavior that, if broken, could let a REST response
+  reflect a mix of old and new state mid-serialization.
+- Malformed input (missing a required field) raises loudly rather than
+  silently storing partial data — deliberate, since this is trusted,
+  known-shape data from our own publishers, so a missing key signals a
+  bug in our own pipeline, not something to paper over.
+
+## AI delegation notes
+
+This backend was built with Claude (Anthropic) as a coding partner, used
+deliberately as a teaching/pair-programming tool rather than for
+unreviewed code generation: concepts (MQTT retained messages/QoS, the
+asyncio event loop vs. paho's background thread, `call_soon_threadsafe`,
+snapshot-vs-delta WebSocket design) were explained first, design
+decisions were reasoned through and defended before code was written, and
+every file was walked through line by line as it landed. Real tracebacks
+were debugged from pasted output, not descriptions. All architectural
+decisions (MQTT over Kafka/RabbitMQ/Redis, QoS 1, env-var robot identity,
+no-lock dict + `call_soon_threadsafe`, snapshot-then-delta WebSocket
+payloads, separating `state.py`/`connection_manager.py`/`mqtt_consumer.py`
+by concern) were made and can be explained/defended by the author; AI was
+not used to generate ANSWERS.md/SYSTEM_DESIGN.md content wholesale, only
+to help organize reasoning already worked through in conversation.
+
+## Known gaps / what's next
+
+- **MQTT reconnect handling is incomplete.** The broker connection itself
+  has no `on_disconnect` + auto-reconnect logic wired up in
+  `mqtt_consumer.py` yet — if the broker connection drops mid-run (not
+  just at startup, which the healthcheck already covers), the backend
+  won't currently recover automatically. Flagged as the next thing to
+  build given more time.
+- `ANSWERS.md` and `SYSTEM_DESIGN.md` — pending.
+- Optional stretch goal (`GET /robots/history/{robot_id}`) — not
+  attempted; out of scope for the timebox.
