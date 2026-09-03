@@ -1,7 +1,6 @@
 # Fleet backend — Docker Compose
 #
-# Scaffold only for now. Services will be filled in as each piece
-# lands: broker (Mosquitto) -> robots (mock publishers) -> backend (FastAPI).
+# broker (Mosquitto) -> robots (mock publishers) -> backend (FastAPI)
 version: "3.9"
 
 services:
@@ -12,6 +11,28 @@ services:
       - "1883:1883"
     volumes:
       - ./broker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped
+    healthcheck:
+      # mosquitto_pub is bundled in the image; if it can connect and
+      # publish, the broker is genuinely ready to accept connections
+      # -- not just "the process started".
+      test: ["CMD", "mosquitto_pub", "-h", "localhost", "-t", "healthcheck", "-m", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  backend:
+    build: ./backend
+    container_name: peppermint-backend
+    ports:
+      - "8001:8000"
+    environment:
+      - MQTT_HOST=broker
+      - MQTT_PORT=1883
+    depends_on:
+      broker:
+        condition: service_healthy
     restart: unless-stopped
 
   robot-r1:
@@ -25,7 +46,8 @@ services:
     volumes:
       - ./data:/data:ro
     depends_on:
-      - broker
+      broker:
+        condition: service_healthy
     restart: "no"
 
   robot-r2:
@@ -39,7 +61,8 @@ services:
     volumes:
       - ./data:/data:ro
     depends_on:
-      - broker
+      broker:
+        condition: service_healthy
     restart: "no"
 
   robot-r3:
@@ -53,7 +76,8 @@ services:
     volumes:
       - ./data:/data:ro
     depends_on:
-      - broker
+      broker:
+        condition: service_healthy
     restart: "no"
 
   robot-r4:
@@ -67,7 +91,8 @@ services:
     volumes:
       - ./data:/data:ro
     depends_on:
-      - broker
+      broker:
+        condition: service_healthy
     restart: "no"
 
   robot-r5:
@@ -81,7 +106,8 @@ services:
     volumes:
       - ./data:/data:ro
     depends_on:
-      - broker
+      broker:
+        condition: service_healthy
     restart: "no"
 
   robot-r6:
@@ -95,7 +121,8 @@ services:
     volumes:
       - ./data:/data:ro
     depends_on:
-      - broker
+      broker:
+        condition: service_healthy
     restart: "no"
 
   robot-r7:
@@ -109,7 +136,8 @@ services:
     volumes:
       - ./data:/data:ro
     depends_on:
-      - broker
+      broker:
+        condition: service_healthy
     restart: "no"
 
   robot-r8:
@@ -123,5 +151,6 @@ services:
     volumes:
       - ./data:/data:ro
     depends_on:
-      - broker
+      broker:
+        condition: service_healthy
     restart: "no"
