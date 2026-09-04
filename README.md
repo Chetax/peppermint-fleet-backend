@@ -78,8 +78,8 @@ peppermint-fleet-backend/
 ├── data/                       # robots.json, events.jsonl (provided fixtures)
 ├── docker-compose.yml
 ├── README.md
-├── ANSWERS.md                  # pending
-├── SYSTEM_DESIGN.md            # pending
+├── ANSWERS.md                  # 3 written answers, backend track
+├── SYSTEM_DESIGN.md            # 5 written answers, backend track
 └── .gitignore
 ```
 
@@ -139,12 +139,29 @@ to help organize reasoning already worked through in conversation.
 
 ## Known gaps / what's next
 
+These are the honest limitations of what a ~6–10 hour timebox allowed.
+None of them are hidden or papered over — see ANSWERS.md Q3 and
+SYSTEM_DESIGN.md for fuller reasoning on each.
+
 - **MQTT reconnect handling is incomplete.** The broker connection itself
   has no `on_disconnect` + auto-reconnect logic wired up in
   `mqtt_consumer.py` yet — if the broker connection drops mid-run (not
   just at startup, which the healthcheck already covers), the backend
   won't currently recover automatically. Flagged as the next thing to
   build given more time.
-- `ANSWERS.md` and `SYSTEM_DESIGN.md` — pending.
+- **No timestamp check on incoming updates.** `update_robot()` overwrites
+  `fleet_state[robot_id]` unconditionally, with nothing comparing the
+  incoming update's time against what's already stored — so an
+  out-of-order message (delivered late, after a newer one) could briefly
+  make a robot appear to jump backward. A small, targeted fix, not yet
+  made.
+- **No schema validation** on incoming MQTT payloads — the backend trusts
+  the shape of the data because it's produced by our own publishers, but
+  this wouldn't hold up against malformed or unexpected input.
+- **No staleness detection.** `last_updated` is stored on every update
+  but nothing reads it back — a robot that crashes simply stops updating,
+  with `fleet_state` freezing at its last known values and no signal to
+  REST/WebSocket consumers that anything's wrong.
 - Optional stretch goal (`GET /robots/history/{robot_id}`) — not
-  attempted; out of scope for the timebox.
+  attempted; out of scope for the timebox. See `SYSTEM_DESIGN.md` Q1 for
+  how it would plug in.
